@@ -1,0 +1,9 @@
+#folder
+data/
+venv/
+.idea/
+
+#file
+info.txt
+data\NewsResult_import_final.csv
+data\final_NewsResult_20100101-20190730.csv
