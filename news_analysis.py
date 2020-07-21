@@ -8,19 +8,15 @@ import gensim
 from gensim.models import Doc2Vec
 from gensim.utils import simple_preprocess
 import re
-import nltk
-from nltk.corpus import stopwords
+# import nltk
+# from nltk.corpus import stopwords
 from pprint import pprint
 import pandas as pd
 import logging
+from konlpy.tag import Mecab
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 class Doc2VecInput:
-    def __init__(self):
-        # self.tokenizer = Mecab()
-        # self.corpus_fname = 'data/doc2vec_test_data/processed_review_movieid.txt'
-        self.job_id, self.description = self.pre_prosseccing()
-
     def make_bigram(self, text):
         # min_count : Ignore all words and bigrams with total collected count lower than this value.
         # threshold : Represent a score threshold for forming the phrases (higher means fewer phrases).
@@ -30,21 +26,25 @@ class Doc2VecInput:
         bigram_mod = gensim.models.phrases.Phraser(bigram)
         return [bigram_mod[doc] for doc in text]
 
-    def data_text_cleansing(self, text):
+    def data_text_cleansing(self, data):
         print('Run text cleanning...')
         # Convert to list
-        data = text['job_description'].str.replace(pat=r'[^A-Za-z0-9]', repl= r' ', regex=True)
-        data = text['job_description'].str.replace(pat=r'[\s\s+]', repl=r' ', regex=True)
-        data = data.tolist()
+        data = [re.sub('([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', '', str(sent)) for sent in data]
+        # pattern = '(http|ftp|https)://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'  # URL제거
+        data = [re.sub('(http|ftp|https)://(?:[-\w.]|(?:%[\da-fA-F]{2}))+', '', str(sent)) for sent in data]
+        # pattern = '([ㄱ-ㅎㅏ-ㅣ]+)'  # 한글 자음, 모음 제거
+        data = [re.sub('([ㄱ-ㅎㅏ-ㅣ]+)', '', str(sent)) for sent in data]
+        pattern = '<[^>]*>'  # HTML 태그 제거
+        data = [re.sub(pattern=pattern, repl='', string=str(sent)) for sent in data]
+        pattern = '[^\w\s]'  # 특수기호제거
+        data = [re.sub(pattern=pattern, repl='', string=str(sent)) for sent in data]
+        # data = data.tolist()
 
         # # 영문자 이외의 문자는 공백으로 변환
         # data = [re.sub('[^a-zA-Z]', ' ', str(sent)) for sent in data]
         #
         # for sent in data:
         #     print(sent)
-
-        # Remove emails
-        data = [re.sub('\S*@\S*\s?', '', str(sent)) for sent in data]
 
         # Remove new line characters
         data = [re.sub('\s\s+', ' ', str(sent)) for sent in data]
@@ -79,26 +79,26 @@ class Doc2VecInput:
         print(including_words_list)
         return including_words_list
 
-    def remove_stopwords(self, texts):
-        print('Remove stopwords...')
-        stop_words = stopwords.words('english')
-        stopwords_list = self.get_stop_words('data/doc2vec_test_data/0702')
-        print('Append stopwords list: ', len(stopwords_list), 'words')
-        # stop_words.extend(stopwords_list)  #추가할 stopwords list
-        return [[word for word in simple_preprocess(str(doc)) if word not in stop_words] for doc in texts]
+    # def remove_stopwords(self, texts):
+    #     print('Remove stopwords...')
+    #     stop_words = stopwords.words('english')
+    #     stopwords_list = self.get_stop_words('data/doc2vec_test_data/0702')
+    #     print('Append stopwords list: ', len(stopwords_list), 'words')
+    #     # stop_words.extend(stopwords_list)  #추가할 stopwords list
+    #     return [[word for word in simple_preprocess(str(doc)) if word not in stop_words] for doc in texts]
 
     def word_filtering(self, texts):
         print('Filtering words...')
         including_list = self.get_including_words('data/doc2vec_test_data/0702/')
         return [[word for word in simple_preprocess(str(doc)) if word in including_list] for doc in texts]
 
-    def lematization(self, texts, allowed_postags=['NOUN', 'ADJ', 'VERB', 'ADV']): #['NOUN', 'ADJ', 'VERB', 'ADV']
+    def lematization(self, texts):
         print('Make lematization...')
+
         texts_out = []
-        nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
         for sent in tqdm(texts):
-            doc = nlp(" ".join(sent))
-            texts_out.append([token.lemma_ for token in doc if token.pos_ in allowed_postags])
+            doc = " ".join(sent)
+            texts_out.append(mecab.nouns(doc))
         # print(texts_out[0])
         return texts_out
 
@@ -113,8 +113,8 @@ class Doc2VecInput:
 
     def pre_prosseccing(self):
         dm = DataManager()
-        data = dm.load_csv(file='data/doc2vec_test_data/0702/merge_0629_adj.csv', encoding='utf-8')
-        print(data.head())
+        data = dm.select_all_db('eco_news_data')
+        data = data['제목']
         # # 수정된 job_title에서 posting_id 가지고 오기
         # posting_ids = data['posting_id']
         # posting_list = posting_ids.to_list()
@@ -130,41 +130,29 @@ class Doc2VecInput:
         # data = dm.load_csv(file='data/doc2vec_test_data/0702/merge_0629_adj.csv', encoding='utf-8')
         sentences = self.data_text_cleansing(data)
         data_words = list(self.sent_to_words(sentences))
-        data_words_nostops = self.remove_stopwords(data_words)
-        data_lemmatized = self.lematization(data_words_nostops)
+        # data_words_nostops = self.remove_stopwords(data_words)
+        # data_lemmatized = self.lematization(data_words)
+        # print(data_lemmatized)
+        # bigram = self.make_bigram(data_lemmatized)
 
-        bigram = self.make_bigram(data_lemmatized)
 
-        # bigram = self.make_bigram(data_words_nostops)
+## 형태소 분석을 먼저 수행한 후 bigram을 만들어야 함
+
+        bigram = self.make_bigram(data_words)
         # data_lemmatized = self.lematization(bigram)
         # for i in range(len(bigram)):
         #     print(f'[{i}] : {bigram[i]}')
 
-        data_lemmatized_filter = self.word_filtering(bigram)
-        for i in range(len(data_lemmatized_filter)):
-            print(f'[{i}] : {data_lemmatized_filter[i]}')
-        # # uniquewords = self.make_unique_words(data_lemmatized)
-        with open('data/doc2vec_test_data/0702/model.corpus', 'wb') as f:
-            pickle.dump(data_lemmatized_filter, f)
-        return data['id'], data_lemmatized_filter
+        # data_lemmatized_filter = self.word_filtering(bigram)
+        # for i in range(len(data_lemmatized_filter)):
+        #     print(f'[{i}] : {data_lemmatized_filter[i]}')
+        # # # uniquewords = self.make_unique_words(data_lemmatized)
+        # with open('data/doc2vec_test_data/0702/model.corpus', 'wb') as f:
+        #     pickle.dump(data_lemmatized_filter, f)
+        # return data['id'], data_lemmatized_filter
 
-    def __iter__(self):
-        for i in range(len(self.description)):
-            try:
-                tokens = self.description[i]
-                # tokens = self.tokenizer.morphs(sentence)
-                job_id = self.job_id[i]
-                tagged_doc = TaggedDocument(words=tokens, tags=['Job_ID_%s' % job_id])
-                yield tagged_doc
-        # with open(self.corpus_fname, encoding='utf-8') as f:
-        #     for line in f:
-        #         try:
-        #             sentence, movie_id = line.strip().split("\u241E")
-        #             tokens = self.tokenizer.morphs(sentence)
-        #             tagged_doc = TaggedDocument(words=tokens, tags=['MOVIE_%s' % movie_id])
-        #             yield tagged_doc
-            except Exception as ex:
-                print(ex)
-                continue
+if __name__ == '__main__':
+    dvi = Doc2VecInput()
+    dvi.pre_prosseccing()
 
 # dvi = Doc2VecInput()

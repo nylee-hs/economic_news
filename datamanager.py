@@ -9,10 +9,10 @@ pymysql.install_as_MySQLdb()
 import MySQLdb
 
 class DataManager:
-    def __init__(self, hostIP, hostUser, hostPW):
-        self.host = hostIP
-        self.user = hostUser
-        self.password = hostPW
+    def __init__(self):
+        self.host = input('host ip : ')
+        self.user = input('user id : ')
+        self.password = input('password : ')
         self.port = 3306
         self.db = 'economic_database'
 
@@ -89,15 +89,23 @@ class DataManager:
     # def get_nouns(self, data):
 
 
-if __name__=='__main__':
-    dm = DataManager()
-    data_types = {'뉴스 식별자':str}
-    data = dm.load_csv(file='data/NewsResult_import_final.csv', encoding='utf-8', data_types = data_types)
-    data['뉴스 식별자'] = data['뉴스 식별자'].astype(str)
-    data = data.loc[:, ~data.columns.str.match('Unnamed')]
-    data.columns=['뉴스식별자','일자','언론사','기고자','제목','통합분류1','통합분류2','통합분류3','사건_사고분류1','사건_사고분류2','사건_사고분류3','인물','위치','기관','키워드','특성추출','본문','URL','분석제외여부','추출명사']
-    print(data.tail())
-    dm.insert_db('eco_news_data', data)
+# if __name__=='__main__':
+#     dm = DataManager()
+#     dm.host = input('host ip : ')
+#     dm.user = input('user id : ')
+#     dm.password = input('password : ')
+#
+#     data = dm.select_all_db('eco_news_data')
+
+
+    # data_types = {'뉴스 식별자':str}
+    # data = dm.load_csv(file='data/NewsResult_import_final.csv', encoding='utf-8', data_types = data_types)
+    # data['뉴스 식별자'] = data['뉴스 식별자'].astype(str)
+    # data = data.loc[:, ~data.columns.str.match('Unnamed')]
+    # data.columns=['뉴스식별자','일자','언론사','기고자','제목','통합분류1','통합분류2','통합분류3','사건_사고분류1','사건_사고분류2','사건_사고분류3','인물','위치','기관','키워드','특성추출','본문','URL','분석제외여부','추출명사']
+    # print(data.tail())
+    # dm.insert_db('eco_news_data', data)
+
 
     # result = dm.select_all_db('blog_data')
     # contents = data['Contents']
