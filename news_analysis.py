@@ -139,7 +139,7 @@ class InputData:
     def pre_prosseccing(self):
         dm = DataManager()
         data = dm.select_all_db('eco_news_data')
-        data = data['제목'][:100]
+        data = data['제목']
         # # 수정된 job_title에서 posting_id 가지고 오기
         # posting_ids = data['posting_id']
         # posting_list = posting_ids.to_list()
