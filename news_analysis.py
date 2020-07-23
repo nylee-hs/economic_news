@@ -1,5 +1,8 @@
+import numpy as np
 import pickle
 import os.path
+
+import pyLDAvis
 from tqdm import tqdm
 from datamanager import DataManager
 from gensim.models.doc2vec import TaggedDocument
@@ -22,15 +25,23 @@ from gensim.models import ldamulticore
 from gensim import corpora
 import matplotlib.pyplot as plt
 import operator
+from gensim.models import CoherenceModel
+import pyLDAvis.gensim as gensimvis
 
-
-logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+# logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 class InputData:
     def __init__(self):
+        self.model_path = self.make_save_path()
         self.corpus = self.pre_prosseccing()
-        self.model_path = 'models/0722/'
         self.word_count, self.word_count_list = self.get_word_count()
+
+    def make_save_path(self): ## directory는 'models/날짜'의 형식으로 설정해야 함
+        print('==== Preprocessing ====')
+        directory = input('model path : ')
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        return directory
 
     def make_bigram(self, text, trigram_check):  ## trigram_check == 1 --> trigram, 0 --> bigram
         # min_count : Ignore all words and bigrams with total collected count lower than this value.
@@ -39,12 +50,12 @@ class InputData:
         #             Heavily depends on concrete scoring-function, see the scoring parameter.
 
         if trigram_check == 0:
-            print('...make bigram...')
+            print(' ...make bigram...')
             bigram = gensim.models.Phrases(text, min_count=5, threshold=30.0)
             bigram_mod = gensim.models.phrases.Phraser(bigram)
             return [bigram_mod[doc] for doc in text]
         elif trigram_check == 1:
-            print('...make trigram...')
+            print(' ...make trigram...')
             bigram = gensim.models.Phrases(text, min_count=5, threshold=20.0)
             bigram_mod = gensim.models.phrases.Phraser(bigram)
             trigram = gensim.models.Phrases(bigram[text], threshold=20.0)
@@ -52,7 +63,7 @@ class InputData:
             return [trigram_mod[bigram_mod[doc]] for doc in text]
 
     def data_text_cleansing(self, data):
-        print('Run text cleanning...')
+        print(' ...Run text cleanning...')
         # Convert to list
         data = [re.sub('([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', '', str(sent)) for sent in data]
         # pattern = '(http|ftp|https)://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'  # URL제거
@@ -83,24 +94,24 @@ class InputData:
         file = 'stopwords_list.csv'
         stop_words_list = []
         if os.path.isfile(path+'/'+file):
-            print('Stop Words File is found')
+            print('  ..Stop Words File is found..')
             dm = DataManager()
             df = dm.load_csv(file='data/doc2vec_test_data/0702/stopwords_list.csv', encoding='utf-8')
             stop_words_list = df['Stopwords'].tolist()
         else:
-            print('Stop Words File is not found')
+            print('  ..Stop Words File is not found..')
         return stop_words_list
 
     def get_including_words(self, path):
         file = 'including_words_list.csv'
         including_words_list = []
         if os.path.isfile(path+'/'+file):
-            print('Including Words File is found')
+            print('  ..Including Words File is found..')
             dm = DataManager()
             df = dm.load_csv(file=path+'including_words_list.csv', encoding='utf-8')
             including_words_list = df['Includingwords'].tolist()
         else:
-            print('Including Words File is not found')
+            print('  ..Including Words File is not found..')
         print(including_words_list)
         return including_words_list
 
@@ -113,12 +124,12 @@ class InputData:
     #     return [[word for word in simple_preprocess(str(doc)) if word not in stop_words] for doc in texts]
 
     def word_filtering(self, texts):
-        print('Filtering words...')
+        print(' ...Filtering words...')
         including_list = self.get_including_words('data/doc2vec_test_data/0702/')
         return [[word for word in simple_preprocess(str(doc)) if word in including_list] for doc in texts]
 
     def lematization(self, texts):
-        print('Make lematization...')
+        print(' ...Make lematization...')
         mecab = Mecab()
         texts_out = []
         for sent in tqdm(texts):
@@ -140,6 +151,8 @@ class InputData:
         dm = DataManager()
         data = dm.select_all_db('eco_news_data')
         data = data['제목']
+        with open(self.model_path + '/model.documents', 'wb') as f:
+            pickle.dump(data, f)
         # # 수정된 job_title에서 posting_id 가지고 오기
         # posting_ids = data['posting_id']
         # posting_list = posting_ids.to_list()
@@ -165,7 +178,7 @@ class InputData:
         data_lemmatized = self.lematization(data_words)
         trigram = self.make_bigram(data_lemmatized, trigram_check=1)
 
-        with open('models/0722/model.corpus', 'wb') as f:
+        with open(self.model_path + '/model.corpus', 'wb') as f:
             pickle.dump(trigram, f)
         return trigram
 
@@ -188,29 +201,30 @@ class InputData:
             key_list.append(item[0])
             value_list.append(item[1])
         df = pd.DataFrame({'Terms':key_list, 'Frequency': value_list})
-        df.to_csv(self.model_path+'frequency.csv', 'w', 'utf-8')
+        df.to_csv(self.model_path+'/frequency.csv', 'w', 'utf-8')
         return word_count, word_count_list
 
 
 class LDABuilder:
     def __init__(self):
-        self.corpus = self.get_corpus('models/0722/model.corpus')
-        self.num_topics = 30
-        self.model_path = ''
+        self.model_path = self.make_save_path()
+        self.corpus = self.get_corpus(self.model_path+ '/model.corpus')[:100]
+        self.num_topics = self.getOptimalTopicNum()
+        self.documents = self.get_documents(self.model_path + '/model.documents')[:100]
 
     def get_corpus(self, corpus_file):
         with open(corpus_file, 'rb') as f:
             corpus = pickle.load(f)
         return corpus
 
+    def get_documents(self, documents_file):
+        with open(documents_file, 'rb') as f:
+            documents = pickle.load(f)
+        return documents
+
     def getOptimalTopicNum(self):
-        cntVec = CountVectorizer(min_df=2)
-        nouns = [' '.join(arr) for arr in self.corpus]
-        cntVec.fit(nouns)
-        vec_matrix = cntVec.transform(nouns)
-        features = cntVec.get_feature_names()
-        corpus = Sparse2Corpus(vec_matrix, documents_columns=False)
-        dictionary = Dictionary([features])
+        dictionary = corpora.Dictionary(self.corpus)
+        corpus = [dictionary.doc2bow(text) for text in self.corpus]
 
         com_nums = []
         for i in range(0, 100, 10):
@@ -220,61 +234,170 @@ class LDABuilder:
                 p = i
             com_nums.append(p)
 
-        perplexity_list = []
+        coherence_list = []
 
         for i in com_nums:
-            lda = LdaModel(corpus, i, dictionary, iterations=10, alpha='auto', random_state=0, passes=10)
-            perp = lda.log_perplexity(corpus)
-            perplexity_list.append(perp)
-            print('k = {}  perplexity = {}'.format(str(i), str(perp)))
+            # lda = gensim.models.ldamodel.LdaModel(corpus=corpus,
+            #                                       id2word=dictionary,
+            #                                       num_topics=i,
+            #                                       iterations=100,
+            #                                       alpha='auto',
+            #                                       random_state=100,
+            #                                       update_every=1,
+            #                                       chunksize=10,
+            #                                       passes=20,
+            #                                       per_word_topics=True)
+            lda = ldamulticore.LdaMulticore(corpus=corpus,
+                                            id2word=dictionary,
+                                            passes=20,
+                                            num_topics=i,
+                                            workers=4,
+                                            iterations=100,
+                                            alpha='symmetric',
+                                            gamma_threshold=0.001)
+            coh_model_lda = CoherenceModel(model=lda, corpus=corpus, dictionary=dictionary, coherence='u_mass')
+            coherence_value = coh_model_lda.get_coherence()
 
-        perp_dict = dict(zip(com_nums, perplexity_list))
-        sorted_perp_dict = sorted(perp_dict.items(), key=operator.itemgetter(1), reverse=True)
+            # coh = lda.log_perplexity(corpus)
+            coherence_list.append(coherence_value)
+            print('k = {}  coherence value = {}'.format(str(i), str(coherence_value)))
 
-        plt.plot(com_nums, perplexity_list)
+        coh_dict = dict(zip(com_nums, coherence_list))
+        sorted_coh_dict = sorted(coh_dict.items(), key=operator.itemgetter(1), reverse=True)
+
+        plt.plot(com_nums, coherence_list)
         plt.xlabel('topic')
-        plt.ylabel('perplexity')
-        plt.show()
+        plt.ylabel('coherence value')
+        plt.draw()
+        fig = plt.gcf()
+        fig.savefig(self.model_path+'/coherence.png')
+        t_ind = np.argmin(coherence_list)
+        self.num_topics = t_ind * 10
+        print('optimal topic number = ', str(t_ind))
+        return sorted_coh_dict[0][0]
 
-        return sorted_perp_dict[0][0]
-
-    def make_save_path(self, full_path):
-        model_path = '/'.join(full_path.split('/')[:-1])
-        if not os.path.exists(model_path):
-            os.makedirs(model_path)
-        return model_path
+    def make_save_path(self): ## directory는 'models/날짜'의 형식으로 설정해야 함
+        print('==== Modeling Building Process ====')
+        directory = input('model path : ')
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        return directory
 
     def saveLDAModel(self, model_path):
-        self.make_save_path(model_path)
-
+        print(' ...start to build lda model...')
         dictionary = corpora.Dictionary(self.corpus)
         corpus = [dictionary.doc2bow(text) for text in self.corpus]
-        self.num_topics = self.getOptimalTopicNum()
 
-        lda_model = ldamulticore.LdaMulticore(corpus, id2word=dictionary, num_topics=self.num_topics, workers=4)
+        # lda_model = gensim.models.ldamodel.LdaModel(corpus=corpus,
+        #                                           id2word=dictionary,
+        #                                           num_topics=self.num_topics,
+        #                                           iterations=100,
+        #                                           alpha='auto',
+        #                                           random_state=100,
+        #                                           update_every=1,
+        #                                           chunksize=10,
+        #                                           passes=20,
+        #                                           per_word_topics=True)
+
+        lda_model = ldamulticore.LdaMulticore(corpus=corpus,
+                                        id2word=dictionary,
+                                        passes=20,
+                                        num_topics=self.num_topics,
+                                        workers=4,
+                                        iterations=100,
+                                        alpha='symmetric',
+                                        gamma_threshold=0.001)
+
         all_topics = lda_model.get_document_topics(corpus, minimum_probability=0.5, per_word_topics=False)
 
-        documents = []
-        with open(model_path + '.results', 'w', -1, 'utf-8') as f:
+        documents = self.documents
+        with open(model_path + '/lda.results', 'w', -1, 'utf-8') as f:
             for doc_idx, topic in enumerate(all_topics):
                 if len(topic) == 1:
                     topic_id, prob = topic[0]
-                    f.writelines(documents[doc_idx].strip() + "\u241E" + ' '.join(self.corpus[doc_idx]) + "\u241E" + str(topic_id) + "\u241E" + str(prob))
-
-        lda_model.save(model_path + '.model')
-        with open(model_path+'.dictionary', 'wb') as f:
+                    f.writelines(documents[doc_idx].strip() + "\u241E" + ' '.join(self.corpus[doc_idx]) + "\u241E" + str(topic_id) + "\u241E" + str(prob) + '\n')
+        lda_model.save(model_path + '/lda.model')
+        with open(model_path+'model.dictionary', 'wb') as f:
             pickle.dump(dictionary, f)
 
         return lda_model
 
     def main(self):
-        self.getOptimalTopicNum()
-        self.model_path = self.make_save_path('models/0722')
+        # self.model_path = self.make_save_path('models/0722')
         self.saveLDAModel(self.model_path)
 
+class LDAModeler:
+    def __init__(self):
+        self.model_path = self.get_model_path()
+        self.all_topics = self.load_results(self.model_path+'/lda.results')
+        self.model = LdaModel.load(self.model_path+'/lda.model')
+        self.corpus = self.get_corpus(self.model_path+'/model.corpus')
+        self.dictionary = self.get_dictionary(self.model_path+'/lda.model.id2word')
 
+    def get_model_path(self): ## directory는 'models/날짜'의 형식으로 설정해야 함
+        print('==== LDA Model Analyzer ====')
+        directory = input(' model path : ')
+        return directory
+
+    def view_lda_model(self, model, corpus, dictionary):
+        prepared_data = gensimvis.prepare(model, corpus, dictionary)
+        print(prepared_data)
+        # pyLDAvis.save_html(prepared_data, self.model_path+'/vis_result.html')
+
+    def get_corpus(self, corpus_file):
+        with open(corpus_file, 'rb') as f:
+            corpus = pickle.load(f)
+        return corpus
+
+    def load_results(self, result_fname):
+        topic_dict = defaultdict(list)
+        with open(result_fname, 'r', encoding='utf-8') as f:
+            for line in f:
+                sentence, _, topic_id, prob = line.strip().split('\u241E')
+                topic_dict[int(topic_id)].append((sentence, float(prob)))
+
+        for key in topic_dict.keys():
+            topic_dict[key] = sorted(topic_dict[key], key=lambda x:x[1], reverse=True)
+        return topic_dict
+
+    def show_topic_docs(self, topic_id, topn=10):
+        return self.all_topics[topic_id][:topn]
+
+    def show_topic_words(self, topic_id, topn=10):
+        return self.model.show_topic(topic_id, topn)
+
+    def show_topics(self, model):
+        return self.model.show_topics(fommated=False)
+
+    def show_new_dociment_topic(self, documents, model):
+        mecab = Mecab()
+        tokenized_documents = [mecab.morphs(document) for document in documents]
+        curr_corpus = [self.model.id2word.doc2bow(tokenized_documents) for tokenized_document in tokenized_documents]
+        topics = self.model.get_document_topics(curr_corpus, minimum_probability=0.5, per_word_topics=False)
+        for doc_idx, topic in enumerate(topics):
+            if len(topic) == 1:
+                topic_id, prob = topic[0]
+                print(documents[doc_idx], ', topic id: ', str(topic_id), ', prob:', str(prob))
+            else:
+                print(documents[doc_idx], ', there is no dominant topic.')
+
+    def get_dictionary(self, dic_fname):
+        with open(dic_fname, 'rb') as f:
+            dictionary = pickle.load(f)
+        return dictionary
+
+def main():
+    builder = LDABuilder()
+    builder.main()
+    model = LDAModeler()
+
+    for i in range(10):
+        print(model.show_topic_words(i))
+    model.view_lda_model(model.model, model.corpus, model.dictionary)
 if __name__ == '__main__':
-    InputData()
-    # dvi.pre_prosseccing()
+    main()
+
+
+
 
 # dvi = Doc2VecInput()
